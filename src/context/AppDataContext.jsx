@@ -1,10 +1,10 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 
-const emptyRawData = {
+const emptyRawData = () => ({
   headers: [],
   rows: [],
   fileName: '',
-}
+})
 
 const AppDataContext = createContext(null)
 
@@ -20,6 +20,19 @@ export function AppDataProvider({ children }) {
 
   const hasData = Boolean(rawData.headers?.length && rawData.rows?.length)
 
+  /** 是否有可预览/可导出的表格内容（表头或数据行任一有即可） */
+  const hasExportableData = Boolean(rawData.headers?.length || rawData.rows?.length)
+
+  /** 上传区是否仍有可清除内容（含仅表头、仅有文件名等） */
+  const hasUploadPayload = Boolean(
+    rawData.headers?.length || rawData.rows?.length || rawData.fileName,
+  )
+
+  const clearAllData = useCallback(() => {
+    setRawData(emptyRawData())
+    setAiAnswer('')
+  }, [])
+
   useEffect(() => {
     if (!hasData) setAiAnswer('')
   }, [hasData])
@@ -28,12 +41,15 @@ export function AppDataProvider({ children }) {
     () => ({
       rawData,
       setRawData,
+      clearAllData,
       tableData,
       hasData,
+      hasExportableData,
+      hasUploadPayload,
       aiAnswer,
       setAiAnswer,
     }),
-    [rawData, tableData, hasData, aiAnswer],
+    [rawData, clearAllData, tableData, hasData, hasExportableData, hasUploadPayload, aiAnswer],
   )
 
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>

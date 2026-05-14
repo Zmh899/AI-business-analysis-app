@@ -68,7 +68,7 @@ async function parseExcelFile(file) {
 }
 
 export default function DataUploader() {
-  const { rawData, setRawData } = useAppData()
+  const { rawData, setRawData, clearAllData, hasUploadPayload } = useAppData()
   const inputId = useId()
   const fileRef = useRef(null)
   const { headers, rows, fileName } = rawData
@@ -78,7 +78,7 @@ export default function DataUploader() {
   const [isDragging, setIsDragging] = useState(false)
 
   const previewRows = rows.slice(0, 100)
-  const hasData = headers.length > 0 || rowCount > 0
+  const showPreview = headers.length > 0 || rowCount > 0
 
   const ingestFile = useCallback(
     async (file) => {
@@ -133,7 +133,7 @@ export default function DataUploader() {
 
   const onClear = () => {
     setError('')
-    setRawData({ headers: [], rows: [], fileName: '' })
+    clearAllData()
     if (fileRef.current) fileRef.current.value = ''
   }
 
@@ -147,7 +147,7 @@ export default function DataUploader() {
         <button
           type="button"
           onClick={onClear}
-          disabled={!hasData && !fileName}
+          disabled={!hasUploadPayload}
           className="inline-flex shrink-0 items-center justify-center rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-sm font-medium text-neutral-700 shadow-sm transition hover:border-neutral-300 hover:bg-neutral-50 disabled:pointer-events-none disabled:opacity-40"
         >
           清除数据
@@ -199,7 +199,7 @@ export default function DataUploader() {
         </div>
       ) : null}
 
-      {hasData ? (
+      {showPreview ? (
         <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-100 bg-neutral-50/80 px-4 py-3">
             <p className="text-sm font-medium text-neutral-800">

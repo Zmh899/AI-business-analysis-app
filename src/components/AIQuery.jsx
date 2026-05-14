@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useAppData } from '../context/AppDataContext.jsx'
@@ -271,9 +271,13 @@ export const aiMarkdownComponents = {
 }
 
 export default function AIQuery() {
-  const { tableData, aiAnswer, setAiAnswer } = useAppData()
+  const { tableData, aiAnswer, setAiAnswer, hasData } = useAppData()
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!hasData) setQuestion('')
+  }, [hasData])
 
   const { summaryText, stats } = useMemo(() => buildAnalysisContext(tableData), [tableData])
 

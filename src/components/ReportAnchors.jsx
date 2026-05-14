@@ -9,13 +9,13 @@ import MetricsDashboard from './MetricsDashboard.jsx'
  * 离屏挂载与 ReportGenerator 同 id 的 DOM，避免 Tab 切换卸载后无法导出 PDF。
  */
 export default function ReportAnchors() {
-  const { hasData, aiAnswer } = useAppData()
-  if (!hasData) return null
+  const { hasExportableData, aiAnswer } = useAppData()
+  if (!hasExportableData) return null
 
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none fixed -left-[12000px] top-0 z-[-1] w-[794px] max-w-[100vw] space-y-8 bg-white p-6 text-left text-neutral-900 shadow-none"
+      className="pointer-events-none fixed left-[-9999px] top-0 z-[1] w-[794px] max-w-[100vw] space-y-8 bg-white p-6 text-left text-neutral-900 shadow-none"
     >
       <div id="report-section-dashboard" className="report-pdf-avoid-break">
         <MetricsDashboard />

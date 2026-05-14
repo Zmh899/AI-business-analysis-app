@@ -23,7 +23,7 @@ export default function App() {
 }
 
 function AppShell() {
-  const { hasData } = useAppData()
+  const { hasData, hasExportableData } = useAppData()
   const [tab, setTab] = useState('import')
 
   useEffect(() => {
@@ -87,7 +87,6 @@ function AppShell() {
         {tab === 'import' && (
           <div className="space-y-6 sm:space-y-8">
             <DataUploader />
-            <ReportGenerator />
           </div>
         )}
 
@@ -108,9 +107,14 @@ function AppShell() {
             <AnomalyDetector />
           </div>
         )}
+        {hasExportableData ? (
+          <section className="mt-8 border-t border-neutral-200 pt-8 sm:mt-10 sm:pt-10" aria-label="经营报告导出">
+            <ReportGenerator />
+          </section>
+        ) : null}
       </main>
 
-      {hasData ? <ReportAnchors /> : null}
+      {hasExportableData ? <ReportAnchors /> : null}
     </div>
   )
 }

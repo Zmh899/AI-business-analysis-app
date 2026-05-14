@@ -1,6 +1,153 @@
 import { useCallback, useState } from 'react'
 import html2pdf from 'html2pdf.js'
 
+/**
+ * html2canvas 1.x 无法解析 Tailwind v4 中的 oklab/oklch。
+ * 策略：在 onclone 里先用 getComputedStyle 把布局/颜色内联到克隆节点，再移除全部外链与 <style>，
+ * 避免解析 oklab；不再移除 class，以免高度链断裂导致「空白 PDF」。
+ */
+const PDF_SAFE_CSS = `
+[data-report-print-host] svg, [data-report-print-host] svg * { vector-effect: non-scaling-stroke; }
+[data-report-print-host] .recharts-wrapper { width:100% !important; min-height: 280px !important; }
+`
+
+const PROPS_TO_INLINE = [
+  'display',
+  'flex-direction',
+  'flex-wrap',
+  'align-items',
+  'justify-content',
+  'align-content',
+  'gap',
+  'row-gap',
+  'column-gap',
+  'padding',
+  'padding-top',
+  'padding-right',
+  'padding-bottom',
+  'padding-left',
+  'margin',
+  'margin-top',
+  'margin-right',
+  'margin-bottom',
+  'margin-left',
+  'width',
+  'min-width',
+  'max-width',
+  'height',
+  'min-height',
+  'max-height',
+  'font-size',
+  'font-weight',
+  'line-height',
+  'letter-spacing',
+  'text-align',
+  'color',
+  'background-color',
+  'border-top-width',
+  'border-right-width',
+  'border-bottom-width',
+  'border-left-width',
+  'border-top-style',
+  'border-right-style',
+  'border-bottom-style',
+  'border-left-style',
+  'border-top-color',
+  'border-right-color',
+  'border-bottom-color',
+  'border-left-color',
+  'border-radius',
+  'box-shadow',
+  'overflow',
+  'overflow-x',
+  'overflow-y',
+  'opacity',
+  'visibility',
+  'white-space',
+  'grid-template-columns',
+  'grid-template-rows',
+]
+
+function mergeStyleAttr(el, cssText) {
+  const prev = el.getAttribute('style')
+  el.setAttribute('style', [cssText, prev].filter(Boolean).join(';'))
+}
+
+function sanitizeCssValue(value) {
+  if (!value || typeof value !== 'string') return value
+  if (/oklab|oklch|color-mix|lab\(|lch\(/i.test(value)) return 'rgb(51, 65, 85)'
+  return value
+}
+
+function inlineComputedStylesForPdf(root) {
+  if (!root) return
+  const win = root.ownerDocument?.defaultView
+  if (!win) return
+
+  const nodes = [root, ...root.querySelectorAll('*')]
+  for (const el of nodes) {
+    if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'LINK') continue
+    if (el.tagName === 'SVG' || el.closest('svg')) continue
+
+    let cs
+    try {
+      cs = win.getComputedStyle(el)
+    } catch {
+      continue
+    }
+
+    const parts = []
+    for (const prop of PROPS_TO_INLINE) {
+      const val = sanitizeCssValue(cs.getPropertyValue(prop))
+      if (!val) continue
+      if (val === 'none' && !prop.includes('border') && prop !== 'display') continue
+      if ((prop === 'height' || prop === 'min-height') && (val === '0px' || val === 'auto')) continue
+      parts.push(`${prop}:${val}`)
+    }
+    if (parts.length) mergeStyleAttr(el, parts.join(';'))
+  }
+
+  root.querySelectorAll('.recharts-responsive-container').forEach((el) => {
+    mergeStyleAttr(el, 'width:100%;min-height:320px;height:320px;display:block')
+  })
+}
+
+function stripStylesheetsFromClone(documentClone) {
+  if (!documentClone) return
+  documentClone.querySelectorAll('link[rel="stylesheet"]').forEach((el) => el.remove())
+  documentClone.querySelectorAll('style').forEach((el) => el.remove())
+}
+
+function sanitizeCloneForHtml2Canvas(documentClone, clonedRoot) {
+  if (!clonedRoot) return
+
+  // 1. 在仍有关联样式表时，把最终计算样式写入内联，避免后续删表后布局塌缩
+  inlineComputedStylesForPdf(clonedRoot)
+
+  // 2. 去掉会触发 html2canvas 解析 oklab 的样式来源
+  stripStylesheetsFromClone(documentClone)
+
+  // 3. 仅补充 SVG/Recharts 相关兜底
+  const safe = documentClone?.createElement('style')
+  if (safe && documentClone) {
+    safe.setAttribute('data-html2pdf-safe', 'true')
+    safe.textContent = PDF_SAFE_CSS
+    ;(documentClone.head || documentClone.documentElement).appendChild(safe)
+  }
+}
+
+function getHtml2CanvasOptions(hostWidth) {
+  return {
+    scale: 2,
+    useCORS: true,
+    logging: false,
+    backgroundColor: '#ffffff',
+    scrollY: 0,
+    windowWidth: hostWidth,
+    onclone: sanitizeCloneForHtml2Canvas,
+  }
+}
+
 function pad2(n) {
   return String(n).padStart(2, '0')
 }
@@ -23,10 +170,13 @@ function buildPrintHost() {
   const host = document.createElement('div')
   host.setAttribute('data-report-print-host', 'true')
   host.style.boxSizing = 'border-box'
-  host.style.position = 'absolute'
-  host.style.left = '-12000px'
+  // 勿用大幅负 left：html2pdf 会用 deepClone 把节点放进全屏 overflow:hidden 的 overlay，
+  // 负偏移会把整块内容裁到视窗外，导出的 PDF 为空白。
+  host.style.position = 'relative'
+  host.style.left = '0'
   host.style.top = '0'
   host.style.width = '794px'
+  host.style.maxWidth = '100%'
   host.style.minHeight = '200px'
   host.style.padding = '28px 24px 32px'
   host.style.background = '#ffffff'
@@ -34,8 +184,22 @@ function buildPrintHost() {
   host.style.fontFamily = 'system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif'
   host.style.fontSize = '14px'
   host.style.lineHeight = '1.55'
-  host.style.zIndex = '2147483000'
   return host
+}
+
+/** 导出前罩一层 opacity:0，避免 host 在 body 上短暂露在视口内；html2pdf 只克隆 host，不会带上本层透明度。 */
+function buildPrintVeil() {
+  const veil = document.createElement('div')
+  veil.setAttribute('aria-hidden', 'true')
+  veil.style.cssText = [
+    'position:fixed',
+    'inset:0',
+    'pointer-events:none',
+    'z-index:2147482647',
+    'opacity:0',
+    'overflow:hidden',
+  ].join(';')
+  return veil
 }
 
 function appendHeading(root, text) {
@@ -81,8 +245,10 @@ export default function ReportGenerator() {
     const dateStr = formatReportDate()
     const filename = `经营报告-${dateStr}.pdf`
 
+    const veil = buildPrintVeil()
     const host = buildPrintHost()
-    document.body.appendChild(host)
+    veil.appendChild(host)
+    document.body.appendChild(veil)
 
     try {
       const title = document.createElement('div')
@@ -116,19 +282,13 @@ export default function ReportGenerator() {
       }
 
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+      await new Promise((r) => setTimeout(r, 200))
 
       const opt = {
         margin: [8, 8, 10, 8],
         filename,
         image: { type: 'jpeg', quality: 0.95 },
-        html2canvas: {
-          scale: 2,
-          useCORS: true,
-          logging: false,
-          backgroundColor: '#ffffff',
-          scrollY: 0,
-          windowWidth: host.scrollWidth,
-        },
+        html2canvas: getHtml2CanvasOptions(host.scrollWidth),
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
         pagebreak: { mode: ['css', 'legacy'], avoid: ['.report-pdf-avoid-break'] },
       }
@@ -139,14 +299,7 @@ export default function ReportGenerator() {
       let pngOk = false
       try {
         const { default: html2canvas } = await import('html2canvas')
-        const canvas = await html2canvas(host, {
-          scale: 2,
-          useCORS: true,
-          backgroundColor: '#ffffff',
-          logging: false,
-          scrollY: 0,
-          windowWidth: host.scrollWidth,
-        })
+        const canvas = await html2canvas(host, getHtml2CanvasOptions(host.scrollWidth))
         const link = document.createElement('a')
         link.download = `经营报告-${dateStr}-备用截图.png`
         link.href = canvas.toDataURL('image/png', 0.92)
@@ -169,7 +322,7 @@ export default function ReportGenerator() {
       )
       console.error(e)
     } finally {
-      host.remove()
+      veil.remove()
       setBusy(false)
     }
   }, [])
@@ -180,7 +333,7 @@ export default function ReportGenerator() {
         <div>
           <h2 className="text-lg font-semibold tracking-tight text-neutral-900">经营报告导出</h2>
           <p className="mt-0.5 text-sm text-neutral-500">
-            汇总「经营指标」「AI 最新回答」「异常检测」三块区域导出为 PDF。若 PDF 失败，会自动尝试下载同版式 PNG 备用截图。
+            汇总「经营指标」「AI 最新回答」「异常检测」三块区域导出为 PDF；任意页签下均可使用。若 PDF 失败，会自动尝试下载 PNG 备用截图。
           </p>
         </div>
         <button
